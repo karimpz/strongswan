@@ -582,6 +582,9 @@ static char *whitelist[] = {
 	"OPENSSL_init_crypto",
 	"CRYPTO_THREAD_lock_new",
 	"ERR_add_error_data",
+	"ERR_set_mark",
+	"ENGINE_load_builtin_engines",
+	"CONF_modules_load_file",
 	/* OpenSSL libssl */
 	"SSL_COMP_get_compression_methods",
 	/* NSPR */
