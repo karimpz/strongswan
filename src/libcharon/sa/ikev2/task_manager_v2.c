@@ -1458,6 +1458,34 @@ static bool looks_like_mid_sync(private_task_manager_t *this, message_t *msg,
 	return found && !other;
 }
 
+static inline bool can_process_request(private_task_manager_t *this,
+		message_t *msg)
+{
+	ike_sa_id_t *ike_sa_id;
+	exchange_type_t type;
+	ike_sa_state_t state;
+
+	state = this->ike_sa->get_state(this->ike_sa);
+	ike_sa_id = this->ike_sa->get_id(this->ike_sa);
+	type = msg->get_exchange_type(msg);
+
+
+	/* reject initial messages if not received in specific states,
+	 * after rekeying we only expect a DELETE in an INFORMATIONAL,
+	 * and also reject requests for half open initiator IKE_SAs */
+	if ((type == IKE_SA_INIT && state != IKE_CREATED) ||
+		(type == IKE_AUTH && state != IKE_CONNECTING) ||
+		(state == IKE_REKEYED && type != INFORMATIONAL) ||
+		(ike_sa_id->is_initiator(ike_sa_id) &&
+		 (state == IKE_CREATED || state == IKE_CONNECTING)))
+	{
+		DBG1(DBG_IKE, "ignoring %N in IKE_SA state %N", exchange_type_names,
+				type, ike_sa_state_names, state);
+		return FALSE;
+	}
+
+	return TRUE;
+}
 /**
  * Check if a message with message ID 0 looks like it is used to synchronize
  * the message IDs and we are prepared to process it.
@@ -1483,8 +1511,6 @@ METHOD(task_manager_t, process_message, status_t,
 	status_t status;
 	uint32_t mid;
 	bool schedule_delete_job = FALSE;
-	ike_sa_state_t state;
-	exchange_type_t type;
 
 	charon->bus->message(charon->bus, msg, TRUE, FALSE);
 	status = parse_message(this, msg);
@@ -1525,16 +1551,8 @@ METHOD(task_manager_t, process_message, status_t,
 	{
 		if (mid == this->responding.mid || (mid == 0 && is_mid_sync(this, msg)))
 		{
-			/* reject initial messages if not received in specific states,
-			 * after rekeying we only expect a DELETE in an INFORMATIONAL */
-			type = msg->get_exchange_type(msg);
-			state = this->ike_sa->get_state(this->ike_sa);
-			if ((type == IKE_SA_INIT && state != IKE_CREATED) ||
-				(type == IKE_AUTH && state != IKE_CONNECTING) ||
-				(state == IKE_REKEYED && type != INFORMATIONAL))
+			if (!can_process_request(this, msg))
 			{
-				DBG1(DBG_IKE, "ignoring %N in IKE_SA state %N",
-					 exchange_type_names, type, ike_sa_state_names, state);
 				return FAILED;
 			}
 			if (!this->ike_sa->supports_extension(this->ike_sa, EXT_MOBIKE))
