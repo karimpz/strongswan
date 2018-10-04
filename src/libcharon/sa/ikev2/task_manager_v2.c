@@ -1458,33 +1458,58 @@ static bool looks_like_mid_sync(private_task_manager_t *this, message_t *msg,
 	return found && !other;
 }
 
-static inline bool can_process_request(private_task_manager_t *this,
-		message_t *msg)
+/**
+ * Check whether we should reject the given request message
+ */
+static inline bool reject_request(private_task_manager_t *this,
+								  message_t *msg)
 {
-	ike_sa_id_t *ike_sa_id;
-	exchange_type_t type;
 	ike_sa_state_t state;
+	exchange_type_t type;
+	ike_sa_id_t *ike_sa_id;
+	bool reject = FALSE;
 
 	state = this->ike_sa->get_state(this->ike_sa);
-	ike_sa_id = this->ike_sa->get_id(this->ike_sa);
 	type = msg->get_exchange_type(msg);
 
-
-	/* reject initial messages if not received in specific states,
-	 * after rekeying we only expect a DELETE in an INFORMATIONAL,
-	 * and also reject requests for half open initiator IKE_SAs */
-	if ((type == IKE_SA_INIT && state != IKE_CREATED) ||
-		(type == IKE_AUTH && state != IKE_CONNECTING) ||
-		(state == IKE_REKEYED && type != INFORMATIONAL) ||
-		(ike_sa_id->is_initiator(ike_sa_id) &&
-		 (state == IKE_CREATED || state == IKE_CONNECTING)))
+	/* reject initial messages if not received in specific states */
+	switch (type)
 	{
-		DBG1(DBG_IKE, "ignoring %N in IKE_SA state %N", exchange_type_names,
-				type, ike_sa_state_names, state);
-		return FALSE;
+		case IKE_SA_INIT:
+			reject = state != IKE_CREATED;
+			break;
+		case IKE_AUTH:
+			reject = state != IKE_CONNECTING;
+			break;
+		default:
+			break;
 	}
 
-	return TRUE;
+	if (!reject)
+	{
+		switch (state)
+		{
+			/* after rekeying we only expect a DELETE in an INFORMATIONAL */
+			case IKE_REKEYED:
+				reject = type != INFORMATIONAL;
+				break;
+			/* also reject requests for half-open IKE_SAs as initiator */
+			case IKE_CREATED:
+			case IKE_CONNECTING:
+				ike_sa_id = this->ike_sa->get_id(this->ike_sa);
+				reject = ike_sa_id->is_initiator(ike_sa_id);
+				break;
+			default:
+				break;
+		}
+	}
+
+	if (reject)
+	{
+		DBG1(DBG_IKE, "ignoring %N in IKE_SA state %N", exchange_type_names,
+			 type, ike_sa_state_names, state);
+	}
+	return reject;
 }
 /**
  * Check if a message with message ID 0 looks like it is used to synchronize
@@ -1551,7 +1576,7 @@ METHOD(task_manager_t, process_message, status_t,
 	{
 		if (mid == this->responding.mid || (mid == 0 && is_mid_sync(this, msg)))
 		{
-			if (!can_process_request(this, msg))
+			if (reject_request(this, msg))
 			{
 				return FAILED;
 			}
