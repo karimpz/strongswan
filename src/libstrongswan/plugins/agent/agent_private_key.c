@@ -364,6 +364,30 @@ METHOD(private_key_t, get_keysize, int,
 	return this->pubkey->get_keysize(this->pubkey);
 }
 
+METHOD(private_key_t, supported_signature_schemes, enumerator_t*,
+	private_agent_private_key_t *this)
+{
+	signature_params_t scheme = {};
+
+	switch (get_type(this))
+	{
+		case KEY_RSA:
+			scheme.scheme = SIGN_RSA_EMSA_PKCS1_SHA2_256;
+			if (get_keysize(this) > 3072)
+			{
+				scheme.scheme = SIGN_RSA_EMSA_PKCS1_SHA2_512;
+			}
+			return enumerator_create_single(signature_params_clone(&scheme),
+											(void*)signature_params_destroy);
+
+		case KEY_ECDSA:
+			return signature_schemes_for_key(KEY_ECDSA, get_keysize(this));
+		default:
+			break;
+	}
+	return enumerator_create_empty();
+}
+
 METHOD(private_key_t, get_public_key, public_key_t*,
 	private_agent_private_key_t *this)
 {
@@ -437,6 +461,7 @@ agent_private_key_t *agent_private_key_open(key_type_t type, va_list args)
 		.public = {
 			.key = {
 				.get_type = _get_type,
+				.supported_signature_schemes = _supported_signature_schemes,
 				.sign = _sign,
 				.decrypt = _decrypt,
 				.get_keysize = _get_keysize,
